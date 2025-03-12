@@ -266,7 +266,7 @@ abstract class Entity
         $recuperable_error = new RecuperableError(
             $message['message'],
             (isset($message['error']) ? $message['error'] : ''),
-            $message['status']
+            'hola'//$message['status']
         );
         if (isset($message['cause'])) {
             $recuperable_error->proccess_causes($message['cause']);
