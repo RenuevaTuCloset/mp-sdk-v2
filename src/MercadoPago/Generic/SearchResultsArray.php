@@ -61,7 +61,7 @@
             $recuperable_error = new RecuperableError(
                 $message['message'],
                 $message['error'],
-                $message['status']
+                'hola'//$message['status']
             );
             
             foreach ($message['cause'] as $causes) { 
