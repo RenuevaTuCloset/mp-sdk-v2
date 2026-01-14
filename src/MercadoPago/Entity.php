@@ -124,7 +124,15 @@ abstract class Entity
         } elseif (intval($response['code']) >= 400 && intval($response['code']) < 500) {
             throw new Exception ($response['body']['message']);
         } else {
-            throw new Exception ("Internal API Error");
+            // Server error - extract details from response
+            $httpCode = $response['code'] ?? 'Unknown';
+            $responseBody = $response['body'] ?? [];
+            $errorMsg = 'MercadoPago API Server Error';
+            if (is_array($responseBody) && !empty($responseBody['message'])) {
+                $errorMsg = $responseBody['message'];
+            }
+            $detail = "HTTP " . $httpCode . ": " . $errorMsg . " | Response: " . json_encode($responseBody);
+            throw new Exception($detail);
         }
 
     }
@@ -152,7 +160,15 @@ abstract class Entity
         } elseif (intval($response['code']) >= 400 && intval($response['code']) < 500) {
             throw new Exception ($response['error'] . " " . $response['message']);
         } else {
-            throw new Exception ("Internal API Error");
+            // Server error - extract details
+            $httpCode = $response['code'] ?? 'Unknown';
+            $responseBody = $response['body'] ?? [];
+            $errorMsg = 'MercadoPago API Server Error';
+            if (is_array($responseBody) && !empty($responseBody['message'])) {
+                $errorMsg = $responseBody['message'];
+            }
+            $detail = "HTTP " . $httpCode . ": " . $errorMsg . " | Response: " . json_encode($responseBody);
+            throw new Exception($detail);
         }
         return $entities; 
     }
@@ -178,7 +194,15 @@ abstract class Entity
             $searchResult->process_error_body($response['body']);
             throw new Exception($response['body']['message']);
         } else {
-            throw new Exception("Internal API Error");
+            // Server error - extract details
+            $httpCode = $response['code'] ?? 'Unknown';
+            $responseBody = $response['body'] ?? [];
+            $errorMsg = 'MercadoPago API Server Error';
+            if (is_array($responseBody) && !empty($responseBody['message'])) {
+                $errorMsg = $responseBody['message'];
+            }
+            $detail = "HTTP " . $httpCode . ": " . $errorMsg . " | Response: " . json_encode($responseBody);
+            throw new Exception($detail);
         }
         return $searchResult;
     }
@@ -212,7 +236,7 @@ abstract class Entity
             $this->process_error_body($response['body']); 
             return false;
         } else {
-            throw new Exception ("Internal API Error");
+            $this->handleServerError($response);
         }
     }
     /**
@@ -253,13 +277,117 @@ abstract class Entity
             $this->_last = clone $this;
             return true;
         } elseif (intval($response['code']) >= 300 && intval($response['code']) < 500) {
-            // A recuperable error
+            // A recuperable error (client error: 3xx-4xx)
             $this->process_error_body($response['body']);
             return false;
         } else {
-            // Trigger an exception
-            throw new Exception ("Internal API Error");
+            // Server error (5xx) or unexpected response code
+            $this->handleServerError($response);
+            return false;
         }
+    }
+
+    /**
+     * Handle server errors (5xx and other unexpected HTTP codes)
+     * Provides detailed error information instead of vague "Internal API Error"
+     * 
+     * @param array $response
+     * @throws Exception
+     */
+    private function handleServerError($response)
+    {
+        $httpCode = $response['code'] ?? 'Unknown';
+        $responseBody = $response['body'] ?? [];
+        
+        // Extract error details from response
+        $errorMessage = 'MercadoPago API Server Error';
+        $errorDetails = [];
+        
+        if (is_array($responseBody)) {
+            $errorDetails = [
+                'message' => $responseBody['message'] ?? null,
+                'error' => $responseBody['error'] ?? null,
+                'status' => $responseBody['status'] ?? null,
+                'cause' => $responseBody['cause'] ?? null,
+                'full_response' => json_encode($responseBody),
+            ];
+            
+            if (!empty($responseBody['message'])) {
+                $errorMessage = $responseBody['message'];
+            }
+        } else {
+            $errorDetails['raw_response'] = (string)$responseBody;
+        }
+        
+        // Add context about the entity being saved
+        $entityClass = get_class($this);
+        $entityData = [
+            'entity_class' => $entityClass,
+            'entity_url' => $this->_url ?? 'unknown',
+            'entity_data' => $this->toArray(),
+        ];
+        
+        // Create detailed error message
+        $detailedError = $this->buildDetailedErrorMessage($httpCode, $errorMessage, $errorDetails, $entityData);
+        
+        // Set error on entity for logging
+        $this->error = $detailedError;
+        
+        // Throw exception with full details
+        throw new Exception($detailedError);
+    }
+
+    /**
+     * Build a detailed error message with all available context
+     * 
+     * @param mixed $httpCode
+     * @param string $errorMessage
+     * @param array $errorDetails
+     * @param array $entityData
+     * @return string
+     */
+    private function buildDetailedErrorMessage($httpCode, $errorMessage, $errorDetails, $entityData)
+    {
+        $details = [];
+        
+        // HTTP Status
+        $details[] = "HTTP Status: $httpCode";
+        
+        // API Error Message
+        if (!empty($errorMessage)) {
+            $details[] = "API Error: $errorMessage";
+        }
+        
+        // Additional error information
+        if (!empty($errorDetails['error'])) {
+            $details[] = "Error Code: {$errorDetails['error']}";
+        }
+        
+        if (!empty($errorDetails['status'])) {
+            $details[] = "Status: {$errorDetails['status']}";
+        }
+        
+        // Entity information
+        $details[] = "Entity: {$entityData['entity_class']}";
+        
+        if (!empty($entityData['entity_url'])) {
+            $details[] = "Endpoint: {$entityData['entity_url']}";
+        }
+        
+        // Cause information if available
+        if (!empty($errorDetails['cause'])) {
+            $causes = is_array($errorDetails['cause']) ? json_encode($errorDetails['cause']) : $errorDetails['cause'];
+            $details[] = "Cause: $causes";
+        }
+        
+        // Full response for debugging
+        if (!empty($errorDetails['full_response']) && strlen($errorDetails['full_response']) < 500) {
+            $details[] = "Response Body: {$errorDetails['full_response']}";
+        }
+        
+        $message = "MercadoPago API Error:\n" . implode("\n", $details);
+        
+        return $message;
     }
 
     function process_error_body($message){
@@ -521,7 +649,7 @@ abstract class Entity
             }
             return false;
         } else {
-            throw new Exception ("Internal API Error");
+            $this->handleServerError($response);
         }
     }
 }
